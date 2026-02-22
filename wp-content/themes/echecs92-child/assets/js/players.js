@@ -185,7 +185,7 @@
 
   const LEGACY_EASTER_EGG = (() => {
     if (typeof document === 'undefined') {
-      return { trigger: '', href: '', text: '', issueUrl: '', consumeUrl: '' };
+      return { trigger: '', href: '', text: '', issueUrl: '', issueChallengeUrl: '', consumeUrl: '' };
     }
     const runtime =
       typeof window !== 'undefined' &&
@@ -198,13 +198,16 @@
     const runtimeHref = typeof runtime.href === 'string' ? runtime.href.trim() : '';
     const runtimeText = typeof runtime.text === 'string' ? runtime.text.trim() : '';
     const runtimeIssueUrl = typeof runtime.issueUrl === 'string' ? runtime.issueUrl.trim() : '';
+    const runtimeIssueChallengeUrl =
+      typeof runtime.issueChallengeUrl === 'string' ? runtime.issueChallengeUrl.trim() : '';
     const runtimeConsumeUrl = typeof runtime.consumeUrl === 'string' ? runtime.consumeUrl.trim() : '';
     const trigger = runtimeTrigger || (typeof dataset.easterEggTrigger === 'string' ? dataset.easterEggTrigger.trim().toLowerCase() : '');
     const href = runtimeHref || (typeof dataset.easterEggHref === 'string' ? dataset.easterEggHref.trim() : '');
     const text = runtimeText || (typeof dataset.easterEggText === 'string' ? dataset.easterEggText.trim() : '');
     const issueUrl = runtimeIssueUrl || '';
+    const issueChallengeUrl = runtimeIssueChallengeUrl || '';
     const consumeUrl = runtimeConsumeUrl || '/wp-json/cdje92/v1/rien-code/consume';
-    return { trigger, href, text, issueUrl, consumeUrl };
+    return { trigger, href, text, issueUrl, issueChallengeUrl, consumeUrl };
   })();
 
   const mobileViewportQuery =
@@ -245,6 +248,7 @@
       return '';
     }
   })();
+  const MATHIS_EGG_CHALLENGE_API = LEGACY_EASTER_EGG.issueChallengeUrl || '';
   const IS_MATHIS_EGG_API_SAME_ORIGIN = (() => {
     if (!MATHIS_EGG_API || typeof window === 'undefined') {
       return false;
@@ -291,6 +295,59 @@
     mathisEggRefreshTimer = null;
   };
 
+  const mathisSha256Hex = async (input) => {
+    if (!crypto?.subtle) {
+      throw new Error('WebCrypto unavailable');
+    }
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+    return Array.from(new Uint8Array(hash))
+      .map((value) => value.toString(16).padStart(2, '0'))
+      .join('');
+  };
+
+  const mathisHasLeadingZeroBits = (hexDigest, difficultyBits) => {
+    if (!/^[a-f0-9]{64}$/.test(hexDigest)) {
+      return false;
+    }
+    if (!Number.isFinite(difficultyBits) || difficultyBits < 0 || difficultyBits > 256) {
+      return false;
+    }
+    const fullNibbles = Math.floor(difficultyBits / 4);
+    const remainingBits = difficultyBits % 4;
+    if (fullNibbles > 0 && hexDigest.slice(0, fullNibbles) !== '0'.repeat(fullNibbles)) {
+      return false;
+    }
+    if (remainingBits === 0) {
+      return true;
+    }
+    const nibble = Number.parseInt(hexDigest.charAt(fullNibbles) || '0', 16);
+    if (!Number.isFinite(nibble)) {
+      return false;
+    }
+    return nibble < 1 << (4 - remainingBits);
+  };
+
+  const solveMathisPow = async (challenge, difficulty) => {
+    if (!/^[A-Za-z0-9\-_]{16,128}$/.test(challenge)) {
+      throw new Error('Invalid challenge');
+    }
+
+    const maxAttempts = 2_000_000;
+    for (let counter = 0; counter < maxAttempts; counter += 1) {
+      const digest = await mathisSha256Hex(`${challenge}:${counter}`);
+      if (mathisHasLeadingZeroBits(digest, difficulty)) {
+        return { counter, digest };
+      }
+      if (counter > 0 && counter % 900 === 0) {
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, 0);
+        });
+      }
+    }
+
+    throw new Error('PoW not solved');
+  };
+
   const requestMathisEggUrl = async () => {
     if (!MATHIS_EGG_API) {
       throw new Error('Missing Mathis egg API URL');
@@ -305,6 +362,29 @@
       requestOptions.credentials = 'same-origin';
     } else {
       requestOptions.mode = 'cors';
+    }
+    if (MATHIS_EGG_CHALLENGE_API) {
+      const challengeResponse = await fetch(MATHIS_EGG_CHALLENGE_API, requestOptions);
+      if (!challengeResponse.ok) {
+        throw new Error(`Mathis egg challenge error (${challengeResponse.status})`);
+      }
+      const challengePayload = await challengeResponse.json().catch(() => null);
+      if (
+        !challengePayload ||
+        typeof challengePayload.challenge !== 'string' ||
+        !Number.isFinite(challengePayload.difficulty)
+      ) {
+        throw new Error('Invalid Mathis egg challenge payload');
+      }
+      const proof = await solveMathisPow(
+        challengePayload.challenge,
+        Math.max(0, Number(challengePayload.difficulty))
+      );
+      requestOptions.body = JSON.stringify({
+        challenge: challengePayload.challenge,
+        counter: String(proof.counter),
+        digest: proof.digest,
+      });
     }
     const response = await fetch(MATHIS_EGG_API, requestOptions);
     if (!response.ok) {
@@ -424,6 +504,14 @@
           } catch (error) {
             // noop
           }
+          const overlay = anchor.closest(`#${MATHIS_TAKEOVER_ID}`);
+          if (overlay) {
+            window.setTimeout(() => {
+              if (mathisSequenceActive) {
+                startMathisReturn(overlay);
+              }
+            }, 80);
+          }
         }
         mathisEggPending = false;
         return;
@@ -444,6 +532,14 @@
               popup.opener = null;
             } catch (error) {
               // noop
+            }
+            const overlay = anchor.closest(`#${MATHIS_TAKEOVER_ID}`);
+            if (overlay) {
+              window.setTimeout(() => {
+                if (mathisSequenceActive) {
+                  startMathisReturn(overlay);
+                }
+              }, 80);
             }
           }
         })

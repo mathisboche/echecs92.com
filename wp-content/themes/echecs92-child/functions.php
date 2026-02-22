@@ -100,6 +100,22 @@ if ( ! defined( 'CDJE92_MATHIS_EGG_RATE_LIMIT_MAX' ) ) {
     define( 'CDJE92_MATHIS_EGG_RATE_LIMIT_MAX', 8 );
 }
 
+if ( ! defined( 'CDJE92_MATHIS_EGG_POW_TTL_SECONDS' ) ) {
+    $pow_ttl = (int) getenv( 'CDJE92_MATHIS_EGG_POW_TTL_SECONDS' );
+    if ( $pow_ttl < 15 || $pow_ttl > 300 ) {
+        $pow_ttl = 45;
+    }
+    define( 'CDJE92_MATHIS_EGG_POW_TTL_SECONDS', $pow_ttl );
+}
+
+if ( ! defined( 'CDJE92_MATHIS_EGG_POW_DIFFICULTY_BITS' ) ) {
+    $pow_difficulty = (int) getenv( 'CDJE92_MATHIS_EGG_POW_DIFFICULTY_BITS' );
+    if ( $pow_difficulty < 10 || $pow_difficulty > 24 ) {
+        $pow_difficulty = 17;
+    }
+    define( 'CDJE92_MATHIS_EGG_POW_DIFFICULTY_BITS', $pow_difficulty );
+}
+
 function cdje92_rien_sign_payload( $payload ) {
     return hash_hmac( 'sha256', (string) $payload, wp_salt( 'auth' ) );
 }
@@ -359,6 +375,152 @@ function cdje92_mathis_egg_is_allowed_rest_request() {
     return true;
 }
 
+function cdje92_mathis_egg_pow_key( $challenge ) {
+    $normalized = strtolower( preg_replace( '/[^a-zA-Z0-9\-_]/', '', (string) $challenge ) );
+    if ( $normalized === '' ) {
+        return '';
+    }
+
+    return 'cdje92_mathis_egg_pow_' . substr( hash( 'sha256', $normalized ), 0, 32 );
+}
+
+function cdje92_mathis_egg_pow_fingerprint() {
+    $ua  = strtolower( trim( (string) cdje92_rien_current_user_agent() ) );
+    $ip  = strtolower( trim( (string) cdje92_mathis_egg_client_ip() ) );
+    $raw = $ip . '|' . $ua;
+    return hash( 'sha256', $raw );
+}
+
+function cdje92_mathis_egg_issue_pow_challenge_payload() {
+    try {
+        $challenge = bin2hex( random_bytes( 16 ) );
+    } catch ( Exception $exception ) {
+        $challenge = strtolower( wp_generate_password( 32, false, false ) );
+    }
+
+    $payload = [
+        'fp' => cdje92_mathis_egg_pow_fingerprint(),
+    ];
+
+    $key = cdje92_mathis_egg_pow_key( $challenge );
+    if ( $key === '' ) {
+        return null;
+    }
+
+    set_transient( $key, wp_json_encode( $payload ), CDJE92_MATHIS_EGG_POW_TTL_SECONDS );
+
+    return [
+        'challenge' => $challenge,
+        'difficulty' => (int) CDJE92_MATHIS_EGG_POW_DIFFICULTY_BITS,
+        'expiresIn' => (int) CDJE92_MATHIS_EGG_POW_TTL_SECONDS,
+    ];
+}
+
+function cdje92_mathis_egg_hex_has_leading_zero_bits( $hex_digest, $difficulty_bits ) {
+    $hex = strtolower( trim( (string) $hex_digest ) );
+    if ( ! preg_match( '/^[a-f0-9]{64}$/', $hex ) ) {
+        return false;
+    }
+
+    $bits = (int) $difficulty_bits;
+    if ( $bits < 0 || $bits > 256 ) {
+        return false;
+    }
+
+    $full_nibbles   = intdiv( $bits, 4 );
+    $remaining_bits = $bits % 4;
+
+    if ( $full_nibbles > 0 ) {
+        if ( substr( $hex, 0, $full_nibbles ) !== str_repeat( '0', $full_nibbles ) ) {
+            return false;
+        }
+    }
+
+    if ( $remaining_bits === 0 ) {
+        return true;
+    }
+
+    $next_nibble_char = substr( $hex, $full_nibbles, 1 );
+    if ( $next_nibble_char === '' ) {
+        return false;
+    }
+
+    $next_nibble = hexdec( $next_nibble_char );
+    return $next_nibble < ( 1 << ( 4 - $remaining_bits ) );
+}
+
+function cdje92_mathis_egg_verify_pow_proof( WP_REST_Request $request ) {
+    $payload = $request->get_json_params();
+    if ( ! is_array( $payload ) ) {
+        return false;
+    }
+
+    $challenge = isset( $payload['challenge'] ) ? strtolower( trim( (string) $payload['challenge'] ) ) : '';
+    $counter   = isset( $payload['counter'] ) ? trim( (string) $payload['counter'] ) : '';
+    $digest    = isset( $payload['digest'] ) ? strtolower( trim( (string) $payload['digest'] ) ) : '';
+
+    if ( ! preg_match( '/^[a-z0-9\-_]{16,128}$/', $challenge ) ) {
+        return false;
+    }
+    if ( ! preg_match( '/^\d{1,12}$/', $counter ) ) {
+        return false;
+    }
+    if ( ! preg_match( '/^[a-f0-9]{64}$/', $digest ) ) {
+        return false;
+    }
+
+    $key = cdje92_mathis_egg_pow_key( $challenge );
+    if ( $key === '' ) {
+        return false;
+    }
+
+    $raw_state = get_transient( $key );
+    if ( ! is_string( $raw_state ) || $raw_state === '' ) {
+        return false;
+    }
+
+    delete_transient( $key );
+
+    $state = json_decode( $raw_state, true );
+    if ( ! is_array( $state ) || ! isset( $state['fp'] ) || ! is_string( $state['fp'] ) ) {
+        return false;
+    }
+
+    $expected_fp = cdje92_mathis_egg_pow_fingerprint();
+    if ( ! hash_equals( (string) $state['fp'], $expected_fp ) ) {
+        return false;
+    }
+
+    $expected_digest = hash( 'sha256', $challenge . ':' . $counter );
+    if ( ! hash_equals( $expected_digest, $digest ) ) {
+        return false;
+    }
+
+    return cdje92_mathis_egg_hex_has_leading_zero_bits( $expected_digest, CDJE92_MATHIS_EGG_POW_DIFFICULTY_BITS );
+}
+
+function cdje92_rest_issue_mathis_egg_challenge( WP_REST_Request $request ) {
+    if ( ! cdje92_mathis_egg_is_allowed_rest_request() ) {
+        return new WP_Error( 'cdje92_mathis_egg_forbidden', 'Forbidden', [ 'status' => 403 ] );
+    }
+
+    if ( cdje92_mathis_egg_is_rate_limited() ) {
+        return new WP_Error( 'cdje92_mathis_egg_rate_limited', 'Too Many Requests', [ 'status' => 429 ] );
+    }
+
+    $payload = cdje92_mathis_egg_issue_pow_challenge_payload();
+    if ( ! is_array( $payload ) ) {
+        return new WP_Error( 'cdje92_mathis_egg_challenge_error', 'Service unavailable', [ 'status' => 503 ] );
+    }
+
+    $response = new WP_REST_Response( $payload, 200 );
+    $response->header( 'Cache-Control', 'no-store' );
+    $response->header( 'X-Robots-Tag', 'noindex, nofollow, noarchive' );
+    $response->header( 'Referrer-Policy', 'no-referrer' );
+    $response->header( 'X-Content-Type-Options', 'nosniff' );
+    return $response;
+}
+
 function cdje92_mathis_egg_bridge_request_headers() {
     $ua = cdje92_rien_current_user_agent();
     if ( ! is_string( $ua ) || trim( $ua ) === '' ) {
@@ -397,6 +559,10 @@ function cdje92_rest_issue_mathis_egg_url( WP_REST_Request $request ) {
 
     if ( cdje92_mathis_egg_is_rate_limited() ) {
         return new WP_Error( 'cdje92_mathis_egg_rate_limited', 'Too Many Requests', [ 'status' => 429 ] );
+    }
+
+    if ( ! cdje92_mathis_egg_verify_pow_proof( $request ) ) {
+        return new WP_Error( 'cdje92_mathis_egg_pow_failed', 'Forbidden', [ 'status' => 403 ] );
     }
 
     $bridge_secret = trim( (string) CDJE92_MATHIS_EGG_BRIDGE_SECRET );
@@ -684,6 +850,7 @@ function cdje92_output_runtime_easter_egg_config() {
         'href'    => '',
         'text'    => 'mathisboche.com',
         'issueUrl' => esc_url_raw( rest_url( 'cdje92/v1/mathis-egg-url' ) ),
+        'issueChallengeUrl' => esc_url_raw( rest_url( 'cdje92/v1/mathis-egg-challenge' ) ),
         'consumeUrl' => '',
     ];
 
@@ -3722,6 +3889,12 @@ add_action( 'rest_api_init', function () {
     register_rest_route( 'cdje92/v1', '/mathis-egg-url', [
         'methods'             => WP_REST_Server::CREATABLE,
         'callback'            => 'cdje92_rest_issue_mathis_egg_url',
+        'permission_callback' => '__return_true',
+    ] );
+
+    register_rest_route( 'cdje92/v1', '/mathis-egg-challenge', [
+        'methods'             => WP_REST_Server::CREATABLE,
+        'callback'            => 'cdje92_rest_issue_mathis_egg_challenge',
         'permission_callback' => '__return_true',
     ] );
 } );

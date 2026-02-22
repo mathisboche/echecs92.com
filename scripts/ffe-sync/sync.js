@@ -24,6 +24,16 @@ const { ensureUniqueSlugs } = require('./slugs');
 const { slugify } = require('./text');
 const { limitConcurrency, sleep, writeJson } = require('./util');
 
+const COMITES_FETCH_OPTIONS = {
+  timeoutMs: 60000,
+  retries: 5,
+};
+
+const CLUB_LIST_FETCH_OPTIONS = {
+  timeoutMs: 45000,
+  retries: 4,
+};
+
 const removeIfExists = (targetPath) => {
   if (!targetPath || !fs.existsSync(targetPath)) {
     return;
@@ -193,7 +203,7 @@ const syncFfeClubs = async ({ licensesOnly = false } = {}) => {
   let shouldCleanupStaging = Boolean(stagingPaths);
   console.log('→ Récupération de la liste des comités...');
   try {
-    const comitesHtml = await fetchText(`${BASE_URL}/Comites.aspx`);
+    const comitesHtml = await fetchText(`${BASE_URL}/Comites.aspx`, COMITES_FETCH_OPTIONS);
     const departments = parseDepartments(comitesHtml);
     if (!departments.length) {
       throw new Error('Aucun comité trouvé sur Comites.aspx');
@@ -207,7 +217,8 @@ const syncFfeClubs = async ({ licensesOnly = false } = {}) => {
       process.stdout.write(`→ Clubs du ${dept.code} ${dept.name}... `);
       try {
         const listHtml = await fetchText(
-          `${BASE_URL}/ListeClubs.aspx?Action=CLUBCOMITE&ComiteRef=${encodeURIComponent(dept.code)}`
+          `${BASE_URL}/ListeClubs.aspx?Action=CLUBCOMITE&ComiteRef=${encodeURIComponent(dept.code)}`,
+          CLUB_LIST_FETCH_OPTIONS
         );
         const clubs = parseClubList(listHtml);
         deptClubLists.set(dept.code, clubs);
