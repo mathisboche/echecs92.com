@@ -506,11 +506,10 @@
           }
           const overlay = anchor.closest(`#${MATHIS_TAKEOVER_ID}`);
           if (overlay) {
+            startMathisReturn(overlay);
             window.setTimeout(() => {
-              if (mathisSequenceActive) {
-                startMathisReturn(overlay);
-              }
-            }, 80);
+              startMathisReturn(overlay);
+            }, 180);
           }
         }
         mathisEggPending = false;
@@ -535,11 +534,10 @@
             }
             const overlay = anchor.closest(`#${MATHIS_TAKEOVER_ID}`);
             if (overlay) {
+              startMathisReturn(overlay);
               window.setTimeout(() => {
-                if (mathisSequenceActive) {
-                  startMathisReturn(overlay);
-                }
-              }, 80);
+                startMathisReturn(overlay);
+              }, 180);
             }
           }
         })

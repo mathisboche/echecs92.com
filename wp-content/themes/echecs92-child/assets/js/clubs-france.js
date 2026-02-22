@@ -3816,11 +3816,10 @@
           }
           const overlay = anchor.closest(`#${MATHIS_TAKEOVER_ID}`);
           if (overlay) {
+            startMathisReturn(overlay);
             window.setTimeout(() => {
-              if (mathisSequenceActive) {
-                startMathisReturn(overlay);
-              }
-            }, 80);
+              startMathisReturn(overlay);
+            }, 180);
           }
         } else {
           setSearchStatus("Autorise les popups pour ouvrir le lien secret.", 'error');
@@ -3848,11 +3847,10 @@
             }
             const overlay = anchor.closest(`#${MATHIS_TAKEOVER_ID}`);
             if (overlay) {
+              startMathisReturn(overlay);
               window.setTimeout(() => {
-                if (mathisSequenceActive) {
-                  startMathisReturn(overlay);
-                }
-              }, 80);
+                startMathisReturn(overlay);
+              }, 180);
             }
           } else {
             setSearchStatus("Autorise les popups pour ouvrir le lien secret.", 'error');
