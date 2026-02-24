@@ -497,10 +497,6 @@
           } catch (error) {
             // noop
           }
-          const overlay = anchor.closest(`#${MATHIS_TAKEOVER_ID}`);
-          if (overlay) {
-            resetMathisSourcePage();
-          }
         }
         mathisEggPending = false;
         return;
@@ -522,10 +518,6 @@
           } catch (error) {
             // noop
           }
-          const overlay = anchor.closest(`#${MATHIS_TAKEOVER_ID}`);
-          if (overlay) {
-            resetMathisSourcePage();
-          }
         }
         mathisEggPending = false;
         return;
@@ -546,10 +538,6 @@
               popup.opener = null;
             } catch (error) {
               // noop
-            }
-            const overlay = anchor.closest(`#${MATHIS_TAKEOVER_ID}`);
-            if (overlay) {
-              resetMathisSourcePage();
             }
           }
         })
@@ -976,18 +964,6 @@
       window.setTimeout(finish, 600);
     } else {
       finish();
-    }
-  };
-
-  const resetMathisSourcePage = () => {
-    endMathisTakeover({ silent: true, immediate: true });
-    if (typeof window === 'undefined') {
-      return;
-    }
-    try {
-      window.location.replace('/clubs-92');
-    } catch (error) {
-      window.location.reload();
     }
   };
 
