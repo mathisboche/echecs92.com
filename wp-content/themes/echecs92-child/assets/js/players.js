@@ -226,6 +226,7 @@
 
   const MATHIS_TAKEOVER_ID = 'mathis-takeover';
   const MATHIS_LINK_TEXT = LEGACY_EASTER_EGG.text;
+  const MATHIS_DIRECT_HREF = (LEGACY_EASTER_EGG.href || '').trim() || 'https://mathisboche.com';
   const MATHIS_SUBTLE_SUFFIX_START_INDEX = (() => {
     const value = (MATHIS_LINK_TEXT || '').toLowerCase();
     const index = value.lastIndexOf('.com');
@@ -487,6 +488,23 @@
         return;
       }
       mathisEggPending = true;
+
+      if (MATHIS_DIRECT_HREF) {
+        const popup = window.open(MATHIS_DIRECT_HREF, '_blank', 'noopener');
+        if (popup) {
+          try {
+            popup.opener = null;
+          } catch (error) {
+            // noop
+          }
+          const overlay = anchor.closest(`#${MATHIS_TAKEOVER_ID}`);
+          if (overlay) {
+            resetMathisSourcePage();
+          }
+        }
+        mathisEggPending = false;
+        return;
+      }
 
       const cachedUrl = getCachedMathisEggUrl();
       if (cachedUrl) {
@@ -1294,9 +1312,11 @@
     mathisExitStarted = false;
     clearMathisEggRefreshTimer();
     mathisEggCache = null;
-    prefetchMathisEggUrl({ force: true }).catch(() => {
-      // fallback keeps click-based forced fetch
-    });
+    if (MATHIS_EGG_API) {
+      prefetchMathisEggUrl({ force: true }).catch(() => {
+        // fallback keeps click-based forced fetch
+      });
+    }
     resetMathisRectCache();
     const mathisPerf = getMathisPerfProfile();
     prepareMathisFragments(overlay, mathisPerf);
