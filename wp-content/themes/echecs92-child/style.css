@@ -4484,21 +4484,22 @@ html.cdje92-cinema-prep [data-cdje92-cinema-item]:not(.is-cdje92-cinema-visible)
   display:flex;
   flex-wrap:wrap;
   align-items:center;
-  gap:10px;
-  margin:8px 0 12px;
-  padding:10px 12px;
-  border-radius:12px;
-  border:1px solid #e2e8f0;
-  background:#ffffff;
+  justify-content:center;
+  gap:12px;
+  margin:0 0 12px;
+  padding:8px 24px;
+  border-top:1px solid #e2e8f0;
+  border-bottom:1px solid #e2e8f0;
+  background:#f8fafc;
   color:#0f172a;
   font-size:13px;
+  text-align:center;
 }
 .clubs-monaco-banner[hidden]{
   display:none;
 }
 .clubs-monaco-banner__text{
-  flex:1 1 220px;
-  color:#475569;
+  font-weight:500;
 }
 .clubs-monaco-banner__link{
   font-weight:600;

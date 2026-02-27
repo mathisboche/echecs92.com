@@ -5064,7 +5064,8 @@
     const link = document.createElement('a');
     link.className = 'clubs-monaco-banner__link';
     link.href = MONACO_BANNER_URL;
-    link.textContent = 'chessmatesinternational.com';
+    link.textContent = 'Voir';
+    link.setAttribute('aria-label', 'Voir ChessMates International');
     link.rel = 'noopener';
 
     banner.appendChild(text);
