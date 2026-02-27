@@ -1584,6 +1584,8 @@
   })();
   const resultsShell = document.getElementById('clubs-results-shell');
   const resultsCloseButton = document.getElementById('clubs-results-close');
+  const RESULTS_CLOSE_LABEL_DESKTOP = '↑ Retour à la recherche';
+  const RESULTS_CLOSE_LABEL_MOBILE = '← Retour à la recherche';
   const searchBlock = document.querySelector('.clubs-search-block');
   const DEFAULT_RESULTS_SCROLL_MARGIN = 24;
   const SEARCH_SCROLL_OFFSET = 12;
@@ -1608,6 +1610,15 @@
       return window.innerWidth <= 820;
     }
     return false;
+  };
+  const updateResultsCloseLabel = () => {
+    if (!resultsCloseButton) {
+      return;
+    }
+    const nextLabel = isMobileViewport() ? RESULTS_CLOSE_LABEL_MOBILE : RESULTS_CLOSE_LABEL_DESKTOP;
+    if (resultsCloseButton.textContent !== nextLabel) {
+      resultsCloseButton.textContent = nextLabel;
+    }
   };
   const isElementVisible = (element) => {
     if (!element || typeof element.getClientRects !== 'function') {
@@ -9023,6 +9034,7 @@
     initialiseLocationControls();
     syncDistanceCollapse();
     syncResultsShellToViewport();
+    updateResultsCloseLabel();
     if (shouldRunCinemaEntry) {
       prepareCinemaEntryStage();
     } else {
@@ -9033,6 +9045,7 @@
       const listener = () => {
         syncDistanceCollapse();
         syncResultsShellToViewport();
+        updateResultsCloseLabel();
       };
       if (typeof mobileViewportQuery.addEventListener === 'function') {
         mobileViewportQuery.addEventListener('change', listener);
