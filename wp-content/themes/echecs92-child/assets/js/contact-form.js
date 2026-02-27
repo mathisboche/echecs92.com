@@ -213,11 +213,16 @@
     }
   };
 
-  const recaptchaEnabled = Boolean(captchaField && captchaEl && siteKey);
-  if (!recaptchaEnabled) {
+  if (!captchaField || !captchaEl || !siteKey) {
     setMessageWithEmailFallback(
-      "La vérification anti-robot est temporairement indisponible. Vous pouvez quand même envoyer votre message."
+      "Le formulaire de contact est temporairement indisponible. Merci de réessayer plus tard ou d'envoyer un e-mail à ",
+      FALLBACK_EMAIL,
+      '.'
     );
+    if (submitButton) {
+      submitButton.disabled = true;
+    }
+    return;
   }
 
   let widgetId = null;
@@ -315,10 +320,6 @@
       if (form.reportValidity) {
         form.reportValidity();
       }
-      return;
-    }
-
-    if (!recaptchaEnabled) {
       return;
     }
 

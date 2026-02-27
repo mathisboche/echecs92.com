@@ -4936,51 +4936,59 @@ function cdje92_handle_contact_form() {
         ]);
     }
 
-    if (cdje92_contact_form_use_recaptcha()) {
-        $token = isset($_POST['g-recaptcha-response']) ? sanitize_text_field(wp_unslash($_POST['g-recaptcha-response'])) : '';
-        if (! cdje92_contact_form_verify_recaptcha_token($token)) {
-            $recaptcha_error = cdje92_contact_form_get_recaptcha_last_error();
-            $is_unavailable = false;
+    if (! cdje92_contact_form_use_recaptcha()) {
+        cdje92_contact_form_safe_redirect([
+            'contact_status' => 'error',
+            'contact_error'  => 'recaptcha_unavailable',
+            'contact_email'  => $email,
+            'contact_club'   => $club,
+            'contact_message'=> $message,
+        ]);
+    }
 
-            if (is_array($recaptcha_error)) {
-                $type = isset($recaptcha_error['type']) ? (string) $recaptcha_error['type'] : '';
-                if ($type === 'request_failed' || $type === 'bad_response') {
+    $token = isset($_POST['g-recaptcha-response']) ? sanitize_text_field(wp_unslash($_POST['g-recaptcha-response'])) : '';
+    if (! cdje92_contact_form_verify_recaptcha_token($token)) {
+        $recaptcha_error = cdje92_contact_form_get_recaptcha_last_error();
+        $is_unavailable = false;
+
+        if (is_array($recaptcha_error)) {
+            $type = isset($recaptcha_error['type']) ? (string) $recaptcha_error['type'] : '';
+            if ($type === 'request_failed' || $type === 'bad_response') {
+                $is_unavailable = true;
+            } elseif ($type === 'verification_failed') {
+                $codes = isset($recaptcha_error['error_codes']) && is_array($recaptcha_error['error_codes'])
+                    ? $recaptcha_error['error_codes']
+                    : [];
+                $config_codes = ['missing-input-secret', 'invalid-input-secret'];
+                if (array_intersect($config_codes, $codes)) {
                     $is_unavailable = true;
-                } elseif ($type === 'verification_failed') {
-                    $codes = isset($recaptcha_error['error_codes']) && is_array($recaptcha_error['error_codes'])
-                        ? $recaptcha_error['error_codes']
-                        : [];
-                    $config_codes = ['missing-input-secret', 'invalid-input-secret'];
-                    if (array_intersect($config_codes, $codes)) {
-                        $is_unavailable = true;
-                    }
                 }
             }
-
-            if (defined('WP_DEBUG') && WP_DEBUG && ! empty($recaptcha_error)) {
-                $log = [
-                    'type' => $recaptcha_error['type'] ?? 'unknown',
-                ];
-                if (! empty($recaptcha_error['status_code'])) {
-                    $log['status_code'] = $recaptcha_error['status_code'];
-                }
-                if (! empty($recaptcha_error['error_codes'])) {
-                    $log['error_codes'] = $recaptcha_error['error_codes'];
-                }
-                if (! empty($recaptcha_error['message'])) {
-                    $log['message'] = $recaptcha_error['message'];
-                }
-                error_log('[cdje92] contact form reCAPTCHA error: ' . wp_json_encode($log));
-            }
-
-            cdje92_contact_form_safe_redirect([
-                'contact_status' => 'error',
-                'contact_error'  => $is_unavailable ? 'recaptcha_unavailable' : 'recaptcha_failed',
-                'contact_email'  => $email,
-                'contact_club'   => $club,
-                'contact_message'=> $message,
-            ]);
         }
+
+        if (defined('WP_DEBUG') && WP_DEBUG && ! empty($recaptcha_error)) {
+            $log = [
+                'type' => $recaptcha_error['type'] ?? 'unknown',
+            ];
+            if (! empty($recaptcha_error['status_code'])) {
+                $log['status_code'] = $recaptcha_error['status_code'];
+            }
+            if (! empty($recaptcha_error['error_codes'])) {
+                $log['error_codes'] = $recaptcha_error['error_codes'];
+            }
+            if (! empty($recaptcha_error['message'])) {
+                $log['message'] = $recaptcha_error['message'];
+            }
+            error_log('[cdje92] contact form reCAPTCHA error: ' . wp_json_encode($log));
+        }
+
+        cdje92_contact_form_safe_redirect([
+            'contact_status' => 'error',
+            'contact_error'  => $is_unavailable ? 'recaptcha_unavailable' : 'recaptcha_failed',
+            'contact_email'  => $email,
+            'contact_club'   => $club,
+            'contact_message'=> $message,
+        ]);
     }
 
     $default_recipients = ['contact@echecs92.com'];

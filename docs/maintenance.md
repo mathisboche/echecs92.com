@@ -17,8 +17,8 @@ Le formulaire de contact est fourni par le thème enfant `echecs92-child` via le
 
 - `[cdje92_contact_form]`
 
-Il est protégé par **Google reCAPTCHA v2** (case "Je ne suis pas un robot") quand des clés sont configurées.
-Si reCAPTCHA n'est pas configuré, le formulaire reste envoyable (mode dégradé avec honeypot), mais il est recommandé de réactiver les clés rapidement.
+Il est protégé par **Google reCAPTCHA v2** (case "Je ne suis pas un robot").
+Si reCAPTCHA n'est pas configuré, le formulaire est désactivé.
 
 ### Configuration des cles
 
