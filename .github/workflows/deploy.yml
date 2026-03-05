@@ -26,7 +26,7 @@ jobs:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ftp
+          protocol: ftps
           server-dir: /www/wp-content/themes/
           local-dir: wp-content/themes/
           dangerous-clean-slate: false
@@ -37,7 +37,7 @@ jobs:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ftp
+          protocol: ftps
           server-dir: /www/wp-content/plugins/
           local-dir: wp-content/plugins/
           dangerous-clean-slate: false
@@ -48,7 +48,7 @@ jobs:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ftp
+          protocol: ftps
           server-dir: /www/wp-content/mu-plugins/
           local-dir: wp-content/mu-plugins/
           dangerous-clean-slate: false
@@ -59,7 +59,7 @@ jobs:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ftp
+          protocol: ftps
           server-dir: /www/wp-content/languages/
           local-dir: wp-content/languages/
           dangerous-clean-slate: false

@@ -25,8 +25,9 @@ jobs:
       - name: Mirror uploads from FTP
         working-directory: assets
         run: |
-          lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}" <<EOF
-          set ssl:verify-certificate no
+          lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftps://${FTP_SERVER}" <<EOF
+          set ssl:verify-certificate yes
+          set ftp:ssl-force true
           set ftp:passive-mode true
           mirror --verbose --only-newer /www/wp-content/uploads/ uploads
           bye

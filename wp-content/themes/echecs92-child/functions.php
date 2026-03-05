@@ -1669,6 +1669,65 @@ function cdje92_rest_param_to_bool( $value, $default = false ) {
     return (bool) $default;
 }
 
+function cdje92_rest_get_client_ip() {
+    $candidates = [
+        isset( $_SERVER['HTTP_CF_CONNECTING_IP'] ) ? (string) $_SERVER['HTTP_CF_CONNECTING_IP'] : '',
+        isset( $_SERVER['REMOTE_ADDR'] ) ? (string) $_SERVER['REMOTE_ADDR'] : '',
+    ];
+
+    foreach ( $candidates as $candidate ) {
+        if ( $candidate === '' ) {
+            continue;
+        }
+        $parts = explode( ',', $candidate );
+        $ip = trim( (string) $parts[0] );
+        if ( $ip !== '' && filter_var( $ip, FILTER_VALIDATE_IP ) ) {
+            return $ip;
+        }
+    }
+
+    return '';
+}
+
+function cdje92_rest_rate_limit_key( $bucket ) {
+    $normalized_bucket = strtolower( preg_replace( '/[^a-z0-9_-]/i', '', (string) $bucket ) );
+    if ( $normalized_bucket === '' ) {
+        $normalized_bucket = 'default';
+    }
+
+    $client_ip = cdje92_rest_get_client_ip();
+    $ua = isset( $_SERVER['HTTP_USER_AGENT'] ) ? (string) $_SERVER['HTTP_USER_AGENT'] : '';
+    $host = isset( $_SERVER['HTTP_HOST'] ) ? strtolower( trim( (string) $_SERVER['HTTP_HOST'] ) ) : '';
+    $raw = $normalized_bucket . '|' . $client_ip . '|' . $ua . '|' . $host;
+    return 'cdje92_rl_' . substr( hash( 'sha256', $raw ), 0, 40 );
+}
+
+function cdje92_rest_rate_limit_exceeded( $bucket, $window_seconds = 60, $max_requests = 60 ) {
+    $window = max( 5, (int) $window_seconds );
+    $max = max( 1, (int) $max_requests );
+    $key = cdje92_rest_rate_limit_key( $bucket );
+    $state = get_transient( $key );
+    $now = time();
+
+    if ( ! is_array( $state ) || ! isset( $state['count'], $state['started_at'] ) ) {
+        $state = [
+            'count' => 0,
+            'started_at' => $now,
+        ];
+    }
+
+    $started_at = (int) $state['started_at'];
+    if ( $started_at <= 0 || ( $now - $started_at ) >= $window ) {
+        $state['count'] = 0;
+        $state['started_at'] = $now;
+    }
+
+    $state['count'] = (int) $state['count'] + 1;
+    set_transient( $key, $state, $window );
+
+    return $state['count'] > $max;
+}
+
 function cdje92_fide_is_data_uri( $value ) {
     return is_string( $value ) && preg_match( '/^data:image\//i', $value );
 }
@@ -2680,13 +2739,20 @@ function cdje92_rest_get_ffe_player( WP_REST_Request $request ) {
         return new WP_Error( 'cdje92_dom_missing', 'Fonctionnalite indisponible sur ce serveur.', [ 'status' => 500 ] );
     }
 
+    $is_privileged_request = current_user_can( 'manage_options' );
+    if ( ! $is_privileged_request && cdje92_rest_rate_limit_exceeded( 'ffe-player', 60, 60 ) ) {
+        return new WP_Error( 'cdje92_rate_limited', 'Trop de requetes, merci de reessayer plus tard.', [ 'status' => 429 ] );
+    }
+
     $full = cdje92_rest_param_to_bool( $request->get_param( 'full' ), false );
     $include_opponents = cdje92_rest_param_to_bool(
         $request->get_param( 'include_opponents' ),
         $full
     );
-    $verify_live = cdje92_rest_param_to_bool( $request->get_param( 'verify_live' ), false );
-    $refresh = cdje92_rest_param_to_bool( $request->get_param( 'refresh' ), false );
+    $verify_live_requested = cdje92_rest_param_to_bool( $request->get_param( 'verify_live' ), false );
+    $verify_live = $is_privileged_request && $verify_live_requested;
+    $refresh_requested = cdje92_rest_param_to_bool( $request->get_param( 'refresh' ), false );
+    $refresh = $is_privileged_request && $refresh_requested;
 
     $cache_key = sprintf(
         'cdje92_ffe_player_%s_%d_%d_%d',
@@ -3353,7 +3419,13 @@ function cdje92_ffe_tournaments_build_list_url( $scope, $mode, $params = [] ) {
 }
 
 function cdje92_rest_get_ffe_tournaments_options( WP_REST_Request $request ) {
-    $refresh = cdje92_rest_param_to_bool( $request->get_param( 'refresh' ), false );
+    $is_privileged_request = current_user_can( 'manage_options' );
+    if ( ! $is_privileged_request && cdje92_rest_rate_limit_exceeded( 'ffe-tournaments-options', 60, 30 ) ) {
+        return new WP_Error( 'cdje92_rate_limited', 'Trop de requetes, merci de reessayer plus tard.', [ 'status' => 429 ] );
+    }
+
+    $refresh_requested = cdje92_rest_param_to_bool( $request->get_param( 'refresh' ), false );
+    $refresh = $is_privileged_request && $refresh_requested;
     $payload = cdje92_ffe_tournaments_get_search_options( $refresh );
     if ( ! is_array( $payload ) ) {
         return new WP_Error( 'cdje92_tournaments_options_unavailable', 'Options de recherche indisponibles.', [ 'status' => 502 ] );
@@ -3363,12 +3435,18 @@ function cdje92_rest_get_ffe_tournaments_options( WP_REST_Request $request ) {
 }
 
 function cdje92_rest_get_ffe_tournaments_list( WP_REST_Request $request ) {
+    $is_privileged_request = current_user_can( 'manage_options' );
+    if ( ! $is_privileged_request && cdje92_rest_rate_limit_exceeded( 'ffe-tournaments-list', 60, 45 ) ) {
+        return new WP_Error( 'cdje92_rate_limited', 'Trop de requetes, merci de reessayer plus tard.', [ 'status' => 429 ] );
+    }
+
     $scope = (string) $request->get_param( 'scope' );
     $scope = $scope === '92' ? '92' : 'fr';
     $mode = strtolower( trim( (string) $request->get_param( 'mode' ) ) );
     $page = max( 1, (int) $request->get_param( 'page' ) );
     $load_all = cdje92_rest_param_to_bool( $request->get_param( 'all' ), false );
-    $refresh = cdje92_rest_param_to_bool( $request->get_param( 'refresh' ), false );
+    $refresh_requested = cdje92_rest_param_to_bool( $request->get_param( 'refresh' ), false );
+    $refresh = $is_privileged_request && $refresh_requested;
 
     if ( $mode === '' ) {
         $mode = $scope === '92' ? 'comite' : 'fide';
@@ -3499,12 +3577,18 @@ function cdje92_rest_get_ffe_tournaments_list( WP_REST_Request $request ) {
 }
 
 function cdje92_rest_get_ffe_tournament_detail( WP_REST_Request $request ) {
+    $is_privileged_request = current_user_can( 'manage_options' );
+    if ( ! $is_privileged_request && cdje92_rest_rate_limit_exceeded( 'ffe-tournament-detail', 60, 80 ) ) {
+        return new WP_Error( 'cdje92_rate_limited', 'Trop de requetes, merci de reessayer plus tard.', [ 'status' => 429 ] );
+    }
+
     $ref = preg_replace( '/\D+/', '', (string) $request->get_param( 'ref' ) );
     if ( $ref === '' ) {
         return new WP_Error( 'cdje92_tournament_ref_invalid', 'Reference tournoi invalide.', [ 'status' => 400 ] );
     }
 
-    $refresh = cdje92_rest_param_to_bool( $request->get_param( 'refresh' ), false );
+    $refresh_requested = cdje92_rest_param_to_bool( $request->get_param( 'refresh' ), false );
+    $refresh = $is_privileged_request && $refresh_requested;
     $cache_key = sprintf( 'cdje92_tour_detail_v1_%s', $ref );
 
     if ( ! $refresh ) {
@@ -4708,11 +4792,11 @@ function cdje92_render_contact_form() {
     $status      = isset($_GET['contact_status']) ? sanitize_key(wp_unslash($_GET['contact_status'])) : '';
     $error_code  = isset($_GET['contact_error']) ? sanitize_key(wp_unslash($_GET['contact_error'])) : '';
     $prefill_map = [
-        'email'   => isset($_GET['contact_email']) ? sanitize_text_field(wp_unslash($_GET['contact_email'])) : '',
-        'club'    => isset($_GET['contact_club']) ? sanitize_text_field(wp_unslash($_GET['contact_club'])) : '',
-        'message' => isset($_GET['contact_message']) ? sanitize_textarea_field(wp_unslash($_GET['contact_message'])) : '',
+        'email'   => '',
+        'club'    => '',
+        'message' => '',
     ];
-    $success_email = isset($_GET['contact_email']) ? sanitize_email(wp_unslash($_GET['contact_email'])) : '';
+    $success_email = '';
 
     $messages = [
         'error'   => [
@@ -4842,9 +4926,18 @@ function cdje92_contact_form_get_redirect_url() {
 }
 
 function cdje92_contact_form_safe_redirect( $args = [] ) {
-    $url = add_query_arg($args, cdje92_contact_form_get_redirect_url());
+    $safe_args = [];
+    $allowed_keys = [ 'contact_status', 'contact_error' ];
+    foreach ( $allowed_keys as $key ) {
+        if ( ! isset( $args[ $key ] ) ) {
+            continue;
+        }
+        $safe_args[ $key ] = sanitize_key( (string) $args[ $key ] );
+    }
+
+    $url = add_query_arg($safe_args, cdje92_contact_form_get_redirect_url());
     $anchor = '#contact-form';
-    if (isset($args['contact_status']) && $args['contact_status'] === 'success') {
+    if (isset($safe_args['contact_status']) && $safe_args['contact_status'] === 'success') {
         $anchor = '';
     }
     if ($anchor) {
@@ -4920,9 +5013,6 @@ function cdje92_handle_contact_form() {
         cdje92_contact_form_safe_redirect([
             'contact_status' => 'error',
             'contact_error'  => 'incomplete',
-            'contact_email'  => $email,
-            'contact_club'   => $club,
-            'contact_message'=> $message,
         ]);
     }
 
@@ -4930,9 +5020,6 @@ function cdje92_handle_contact_form() {
         cdje92_contact_form_safe_redirect([
             'contact_status' => 'error',
             'contact_error'  => 'invalid_email',
-            'contact_email'  => $email,
-            'contact_club'   => $club,
-            'contact_message'=> $message,
         ]);
     }
 
@@ -4940,9 +5027,6 @@ function cdje92_handle_contact_form() {
         cdje92_contact_form_safe_redirect([
             'contact_status' => 'error',
             'contact_error'  => 'recaptcha_unavailable',
-            'contact_email'  => $email,
-            'contact_club'   => $club,
-            'contact_message'=> $message,
         ]);
     }
 
@@ -4985,9 +5069,6 @@ function cdje92_handle_contact_form() {
         cdje92_contact_form_safe_redirect([
             'contact_status' => 'error',
             'contact_error'  => $is_unavailable ? 'recaptcha_unavailable' : 'recaptcha_failed',
-            'contact_email'  => $email,
-            'contact_club'   => $club,
-            'contact_message'=> $message,
         ]);
     }
 
@@ -5076,9 +5157,6 @@ HTML;
         cdje92_contact_form_safe_redirect([
             'contact_status' => 'error',
             'contact_error'  => 'send_failed',
-            'contact_email'  => $email,
-            'contact_club'   => $club,
-            'contact_message'=> $message,
         ]);
     }
 
@@ -5137,7 +5215,6 @@ HTML;
 
     cdje92_contact_form_safe_redirect([
         'contact_status' => 'success',
-        'contact_email'  => $email,
     ]);
 }
 add_action('admin_post_cdje92_contact', 'cdje92_handle_contact_form');

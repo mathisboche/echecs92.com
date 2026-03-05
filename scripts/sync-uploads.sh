@@ -6,7 +6,7 @@ set -euo pipefail
 FTP_SERVER="${FTP_SERVER:-}"
 FTP_USERNAME="${FTP_USERNAME:-}"
 FTP_PASSWORD="${FTP_PASSWORD:-}"
-FTP_PROTOCOL="${FTP_PROTOCOL:-ftp}"
+FTP_PROTOCOL="${FTP_PROTOCOL:-ftps}"
 FTP_PORT="${FTP_PORT:-21}"
 LOCAL_DIR="${LOCAL_DIR:-wp-content/uploads}"
 REMOTE_DIR="${REMOTE_DIR:-/www/wp-content/uploads/}"
@@ -27,7 +27,8 @@ if [[ ! -d "$LOCAL_DIR" ]]; then
 fi
 
 lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_PROTOCOL://$FTP_SERVER:$FTP_PORT" <<EOF
-set ssl:verify-certificate no
+set ssl:verify-certificate yes
+set ftp:ssl-force true
 set ftp:passive-mode true
 mirror --reverse --only-newer --verbose --exclude-glob .DS_Store "$LOCAL_DIR" "$REMOTE_DIR"
 bye

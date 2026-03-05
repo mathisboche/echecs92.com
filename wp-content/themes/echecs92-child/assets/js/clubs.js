@@ -3043,14 +3043,14 @@ const handleLocationSubmit = async (event) => {
 	      siege: secondaryAddress || '',
 	      salle: normaliseDashes(raw.salle_jeu || raw.salle || ''),
 	      addressStandard: standardAddress,
-	      phone: normaliseDashes(raw.telephone || raw.phone || ''),
-	      fax: normaliseDashes(raw.fax || ''),
-	      email: normaliseDashes(raw.email || ''),
+	      phone: '',
+	      fax: '',
+	      email: '',
 	      site,
-	      president: normaliseDashes(raw.president || ''),
-	      presidentEmail: normaliseDashes(raw.president_email || raw.presidentEmail || ''),
-	      contact: normaliseDashes(raw.contact || ''),
-	      contactEmail: normaliseDashes(raw.contact_email || raw.contactEmail || ''),
+	      president: '',
+	      presidentEmail: '',
+	      contact: '',
+	      contactEmail: '',
 	      hours: normaliseDashes(raw.horaires || raw.hours || ''),
 	      publics: normaliseDashes(raw.publics || ''),
 	      tarifs: normaliseDashes(raw.tarifs || ''),
@@ -3145,14 +3145,7 @@ const handleLocationSubmit = async (event) => {
       assignIfPresent(club, 'salle', ffeClub.salle);
       assignIfPresent(club, 'siege', ffeClub.siege);
       assignIfPresent(club, 'addressStandard', ffeClub.addressStandard);
-      assignIfPresent(club, 'phone', ffeClub.phone);
-      assignIfPresent(club, 'fax', ffeClub.fax);
-      assignIfPresent(club, 'email', ffeClub.email);
       assignIfPresent(club, 'site', ffeClub.site);
-      assignIfPresent(club, 'president', ffeClub.president);
-      assignIfPresent(club, 'presidentEmail', ffeClub.presidentEmail);
-      assignIfPresent(club, 'contact', ffeClub.contact);
-      assignIfPresent(club, 'contactEmail', ffeClub.contactEmail);
       assignIfPresent(club, 'hours', ffeClub.hours);
       assignIfPresent(club, 'accesPmr', ffeClub.accesPmr);
       assignIfPresent(club, 'interclubs', ffeClub.interclubs);

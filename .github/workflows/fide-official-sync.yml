@@ -39,8 +39,10 @@ jobs:
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
           mkdir -p wp-content/themes/echecs92-child/assets/data
-          if ! lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "ftp://$FTP_SERVER:21" -e "
+          if ! lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "ftps://$FTP_SERVER:21" -e "
           set ftp:passive-mode true
+          set ftp:ssl-force true
+          set ssl:verify-certificate yes
           set net:max-retries 2
           set net:reconnect-interval-base 2
           set net:timeout 20
@@ -53,8 +55,10 @@ jobs:
           fi
           if [[ ! -f wp-content/themes/echecs92-child/assets/data/clubs-france-ffe.json || ! -f wp-content/themes/echecs92-child/assets/data/ffe-players/manifest.json ]]; then
             echo "→ Live data incomplete, attempting fallback recovery from data.__staging..."
-            if ! lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "ftp://$FTP_SERVER:21" -e "
+            if ! lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "ftps://$FTP_SERVER:21" -e "
             set ftp:passive-mode true
+            set ftp:ssl-force true
+            set ssl:verify-certificate yes
             set net:max-retries 2
             set net:reconnect-interval-base 2
             set net:timeout 20
