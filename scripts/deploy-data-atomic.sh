@@ -18,6 +18,8 @@ LOCK_STALE_SECONDS="${DEPLOY_LOCK_STALE_SECONDS:-900}"
 LOCK_HEARTBEAT_SECONDS="${DEPLOY_LOCK_HEARTBEAT_SECONDS:-60}"
 MAX_DEPLOY_ATTEMPTS="${DEPLOY_MAX_ATTEMPTS:-3}"
 DEPLOY_RETRY_SECONDS="${DEPLOY_RETRY_SECONDS:-20}"
+LFTP_SMALL_TIMEOUT_SECONDS="${LFTP_SMALL_TIMEOUT_SECONDS:-45}"
+LFTP_DEPLOY_TIMEOUT_SECONDS="${LFTP_DEPLOY_TIMEOUT_SECONDS:-1800}"
 LOCK_HEARTBEAT_FILE="${LOCK_DIR_NAME}/heartbeat.epoch"
 LOCK_ACQUIRED_FILE="${LOCK_DIR_NAME}/acquired.epoch"
 LOCK_OWNER_FILE="${LOCK_DIR_NAME}/owner.txt"
@@ -88,6 +90,21 @@ if ! [[ "${DEPLOY_RETRY_SECONDS}" =~ ^[0-9]+$ ]] || (( DEPLOY_RETRY_SECONDS < 1 
   exit 1
 fi
 
+if ! [[ "${LFTP_SMALL_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]] || (( LFTP_SMALL_TIMEOUT_SECONDS < 5 )); then
+  echo "Invalid LFTP_SMALL_TIMEOUT_SECONDS: ${LFTP_SMALL_TIMEOUT_SECONDS}" >&2
+  exit 1
+fi
+
+if ! [[ "${LFTP_DEPLOY_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]] || (( LFTP_DEPLOY_TIMEOUT_SECONDS < 60 )); then
+  echo "Invalid LFTP_DEPLOY_TIMEOUT_SECONDS: ${LFTP_DEPLOY_TIMEOUT_SECONDS}" >&2
+  exit 1
+fi
+
+if ! command -v timeout >/dev/null 2>&1; then
+  echo "Missing required command: timeout" >&2
+  exit 1
+fi
+
 write_remote_lock_metadata() {
   local epoch_now="$1"
   local tmp_epoch
@@ -102,7 +119,8 @@ write_remote_lock_metadata() {
     printf 'acquired_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } > "${tmp_owner}"
 
-  lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF >/dev/null 2>&1 || true
+  timeout --signal=TERM --kill-after=5 "${LFTP_SMALL_TIMEOUT_SECONDS}" \
+    lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF >/dev/null 2>&1 || true
 set ftp:passive-mode true
 set ssl:verify-certificate no
 set net:max-retries 2
@@ -123,7 +141,8 @@ read_remote_lock_epoch() {
   local remote_file
   for remote_file in "${LOCK_HEARTBEAT_FILE}" "${LOCK_ACQUIRED_FILE}"; do
     content="$(
-      lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF 2>/dev/null || true
+      timeout --signal=TERM --kill-after=5 "${LFTP_SMALL_TIMEOUT_SECONDS}" \
+        lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF 2>/dev/null || true
 set ftp:passive-mode true
 set ssl:verify-certificate no
 set net:max-retries 1
@@ -144,7 +163,8 @@ EOF
 }
 
 force_release_remote_lock() {
-  lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF >/dev/null 2>&1 || true
+  timeout --signal=TERM --kill-after=5 "${LFTP_SMALL_TIMEOUT_SECONDS}" \
+    lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF >/dev/null 2>&1 || true
 set ftp:passive-mode true
 set ssl:verify-certificate no
 set net:max-retries 2
@@ -167,7 +187,8 @@ start_lock_heartbeat() {
       epoch_now="$(date +%s)"
       tmp_epoch="$(mktemp)"
       printf '%s\n' "${epoch_now}" > "${tmp_epoch}"
-      lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF >/dev/null 2>&1 || true
+      timeout --signal=TERM --kill-after=5 "${LFTP_SMALL_TIMEOUT_SECONDS}" \
+        lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF >/dev/null 2>&1 || true
 set ftp:passive-mode true
 set ssl:verify-certificate no
 set net:max-retries 1
@@ -192,16 +213,23 @@ stop_lock_heartbeat() {
 }
 
 acquire_remote_lock() {
+  local started_at
   local waited=0
   local epoch_now
   local lock_epoch
   local lock_age
   local force_cleanup=0
   local last_forced_cleanup_at=0
+  local sleep_for
+  local remaining
+
+  started_at="$(date +%s)"
 
   while true; do
     epoch_now="$(date +%s)"
-    if lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF
+    waited=$((epoch_now - started_at))
+    if timeout --signal=TERM --kill-after=5 "${LFTP_SMALL_TIMEOUT_SECONDS}" \
+      lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF
 set ftp:passive-mode true
 set ssl:verify-certificate no
 set net:max-retries 2
@@ -222,6 +250,8 @@ EOF
 
     force_cleanup=0
     if lock_epoch="$(read_remote_lock_epoch)"; then
+      epoch_now="$(date +%s)"
+      waited=$((epoch_now - started_at))
       lock_age=$((epoch_now - lock_epoch))
       if (( lock_age < 0 )); then
         lock_age=0
@@ -230,6 +260,8 @@ EOF
         force_cleanup=1
       fi
     else
+      epoch_now="$(date +%s)"
+      waited=$((epoch_now - started_at))
       if (( waited >= LOCK_STALE_SECONDS )); then
         force_cleanup=1
       fi
@@ -241,25 +273,30 @@ EOF
       last_forced_cleanup_at="${epoch_now}"
     fi
 
+    epoch_now="$(date +%s)"
+    waited=$((epoch_now - started_at))
     if (( waited >= LOCK_WAIT_SECONDS )); then
       echo "ERROR: Could not acquire remote deploy lock (${LOCK_DIR_NAME}) after ${LOCK_WAIT_SECONDS}s." >&2
       return 1
     fi
 
-    local sleep_for="${LOCK_RETRY_SECONDS}"
-    local remaining=$((LOCK_WAIT_SECONDS - waited))
+    sleep_for="${LOCK_RETRY_SECONDS}"
+    remaining=$((LOCK_WAIT_SECONDS - waited))
     if (( remaining < sleep_for )); then
       sleep_for="${remaining}"
     fi
+    if (( sleep_for < 1 )); then
+      sleep_for=1
+    fi
     echo "→ Deploy lock busy; waited ${waited}s/${LOCK_WAIT_SECONDS}s. Retrying in ${sleep_for}s..."
     sleep "${sleep_for}"
-    waited=$((waited + sleep_for))
   done
 }
 
 release_remote_lock() {
   stop_lock_heartbeat
-  lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF || true
+  timeout --signal=TERM --kill-after=5 "${LFTP_SMALL_TIMEOUT_SECONDS}" \
+    lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF || true
 set ftp:passive-mode true
 set ssl:verify-certificate no
 set net:max-retries 1
@@ -274,7 +311,8 @@ EOF
 cleanup_attempt_upload_dir() {
   local upload_dir_name="$1"
 
-  lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF || true
+  timeout --signal=TERM --kill-after=5 "${LFTP_SMALL_TIMEOUT_SECONDS}" \
+    lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF || true
 set ftp:passive-mode true
 set ssl:verify-certificate no
 set net:max-retries 2
@@ -293,7 +331,8 @@ deploy_once() {
 
   echo "→ Uploading generated data to remote staging (${upload_dir_name})..."
 
-  if lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF
+  if timeout --signal=TERM --kill-after=10 "${LFTP_DEPLOY_TIMEOUT_SECONDS}" \
+    lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}:21" <<EOF
 set ftp:passive-mode true
 set ssl:verify-certificate no
 set net:max-retries 8
