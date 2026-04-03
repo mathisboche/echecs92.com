@@ -65,6 +65,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Verify postal coordinates updater
+        run: node --test scripts/update-postal-coordinates-fr.test.js
       - name: Regenerate address hints
         run: |
           node scripts/update-postal-coordinates-fr.js
