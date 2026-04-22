@@ -13,9 +13,12 @@ from urllib.request import Request, urlopen
 WRAPPER_HEAD_RE = re.compile(br"<title>\s*Wayback Machine\s*</title>", re.IGNORECASE)
 WMTB_URL_RE = re.compile(br'id="wmtbURL"[^>]*\svalue="([^"]+)"', re.IGNORECASE)
 WMTB_DATE_RE = re.compile(br'name="date"\s+value="(\d{14})"', re.IGNORECASE)
+DOCUMENT_LOCATION_RE = re.compile(br'document\.location\.href\s*=\s*"([^"]+)"', re.IGNORECASE)
+WAYBACK_RE = re.compile(br"https?://web\.archive\.org/web/(\d+)(?:[a-z_]+)?/(https?://[^\"'\s<>]+)")
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico"}
 TEXT_EXTS = {".css", ".js"}
+DOCUMENT_EXTS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip"}
 
 UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -50,13 +53,23 @@ def extract_wayback_info(path: Path) -> tuple[str, str] | None:
 
     url_match = WMTB_URL_RE.search(blob)
     date_match = WMTB_DATE_RE.search(blob)
-    if not url_match or not date_match:
-        return None
+    original_url = ""
+    timestamp = ""
+    if url_match and date_match:
+        original_url = url_match.group(1).decode("utf-8", errors="ignore").strip()
+        timestamp = date_match.group(1).decode("ascii", errors="ignore").strip()
 
-    original_url = url_match.group(1).decode("utf-8", errors="ignore").strip()
-    timestamp = date_match.group(1).decode("ascii", errors="ignore").strip()
     if not original_url or not timestamp:
-        return None
+        location_match = DOCUMENT_LOCATION_RE.search(blob)
+        if not location_match:
+            return None
+        wayback_match = WAYBACK_RE.match(location_match.group(1))
+        if not wayback_match:
+            return None
+        timestamp = wayback_match.group(1).decode("ascii", errors="ignore").strip()
+        original_url = wayback_match.group(2).decode("utf-8", errors="ignore").strip()
+        if not original_url or not timestamp:
+            return None
     return (timestamp, original_url)
 
 
@@ -127,6 +140,8 @@ def fix_one(path: Path, delay: float) -> bool:
         modes = ["im_", "id_"]
     elif ext in TEXT_EXTS:
         modes = ["id_"]
+    elif ext in DOCUMENT_EXTS:
+        modes = ["id_"]
     else:
         modes = ["id_"]
 
@@ -157,7 +172,7 @@ def main() -> int:
     for path in root.rglob("*"):
         if not path.is_file():
             continue
-        if path.suffix.lower() not in (IMAGE_EXTS | TEXT_EXTS):
+        if path.suffix.lower() not in (IMAGE_EXTS | TEXT_EXTS | DOCUMENT_EXTS):
             continue
         if is_wayback_wrapper(path):
             candidates.append(path)
@@ -180,4 +195,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

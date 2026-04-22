@@ -65,6 +65,35 @@ Puis ouvrir `http://localhost:8080`.
 
 Le déploiement du contenu de `wp-content/` est automatisé via GitHub Actions (workflows dans `.github/workflows/`).
 
+## Archive statique de l'ancien site
+
+L'archive historique de `www.echecs92.fr` est reconstruite automatiquement chaque semaine par :
+
+- `.github/workflows/archive-site.yml`
+
+Le workflow :
+
+- récupère la dernière capture Wayback disponible ;
+- complète les pages via l'index CDX Wayback pour ne pas dépendre uniquement des liens de la page d'accueil ;
+- télécharge les fichiers et assets Jimdo manquants quand ils sont référencés ;
+- supprime les wrappers/barres Wayback ;
+- réécrit les liens internes vers des fichiers locaux ;
+- valide l'archive avant déploiement ;
+- publie `archive-wayback/` par FTP si les secrets `FTP_SERVER`, `FTP_USERNAME` et `FTP_PASSWORD` sont configurés.
+
+Variables GitHub optionnelles :
+
+- `ARCHIVE_DOMAIN` : domaine public de l'archive, par défaut `archive.echecs92.com`.
+- `ARCHIVE_FTP_SERVER_DIR` : dossier FTP cible, par défaut `/www/archive/`.
+
+Commande locale équivalente :
+
+```bash
+./scripts/update-archive-wayback.sh archive-wayback archive.echecs92.com latest
+```
+
+Si la validation échoue, consulter `archive-wayback/missing-wayback-urls.txt` et les erreurs du workflow avant de remplacer l'archive publiée.
+
 ### Données FFE (déploiement atomique)
 
 Les workflows de synchro FFE déploient désormais les données via un dossier de staging FTP puis un swap final :

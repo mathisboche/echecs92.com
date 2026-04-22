@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import gzip
+import json
 import re
 import sys
 import time
+from html import unescape
 from http.client import RemoteDisconnected
 from pathlib import Path
 from typing import Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse, urlsplit, urlunsplit
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
@@ -32,6 +35,12 @@ DIRECT_FALLBACK_HOSTS = {
     "u.jimcdn.com",
     "image.jimcdn.com",
 }
+
+UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
 
 
 def usage() -> None:
@@ -63,7 +72,7 @@ def build_target_path(root: Path, host: str, path: str, query: str) -> Path:
 
 
 def load_missing(path: Path) -> Iterable[str]:
-    return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [unescape(line.strip()) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def download(url: str, target: Path, delay: float, retries: int = 3) -> bool:
@@ -76,11 +85,7 @@ def download(url: str, target: Path, delay: float, retries: int = 3) -> bool:
             req = Request(
                 normalized_url,
                 headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/120.0.0.0 Safari/537.36"
-                    ),
+                    "User-Agent": UA,
                     "Accept-Encoding": "gzip",
                 },
             )
@@ -125,6 +130,32 @@ def normalize_url(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, path, query, parts.fragment))
 
 
+def latest_wayback_capture(original_url: str) -> str | None:
+    query = urlencode(
+        [
+            ("url", original_url),
+            ("output", "json"),
+            ("fl", "timestamp,original,statuscode"),
+            ("filter", "statuscode:200"),
+            ("sort", "reverse"),
+            ("limit", "1"),
+        ]
+    )
+    try:
+        req = Request(f"https://web.archive.org/cdx?{query}", headers={"User-Agent": UA})
+        with urlopen(req, timeout=60) as resp:
+            rows = json.load(resp)
+    except Exception:
+        return None
+    if len(rows) < 2:
+        return None
+    timestamp = str(rows[1][0])
+    captured_url = str(rows[1][1])
+    if not timestamp or not captured_url:
+        return None
+    return f"https://web.archive.org/web/{timestamp}id_/{captured_url}"
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         usage()
@@ -167,7 +198,7 @@ def main() -> int:
             skipped += 1
             continue
 
-        original = match.group(1)
+        original = unescape(match.group(1))
         parsed = urlparse(original)
         host = parsed.netloc
         if host not in ALLOWED_HOSTS:
@@ -180,6 +211,10 @@ def main() -> int:
             continue
 
         downloaded = download(line, target, delay)
+        if not downloaded:
+            latest_capture = latest_wayback_capture(original)
+            if latest_capture:
+                downloaded = download(latest_capture, target, delay)
         if not downloaded:
             # For Jimdo file downloads, the live endpoint is often accessible even
             # when the site itself is behind bot protection.

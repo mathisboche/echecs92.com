@@ -12,6 +12,10 @@ WAYBACK_BLOCK_RE = re.compile(
     r"<script[^>]+bundle-playback\.js[^>]*></script>.*?<!-- End Wayback Rewrite JS Include -->",
     re.IGNORECASE | re.DOTALL,
 )
+WAYBACK_TOOLBAR_RE = re.compile(
+    r"<!-- BEGIN WAYBACK TOOLBAR INSERT -->.*?<!-- END WAYBACK TOOLBAR INSERT -->",
+    re.IGNORECASE | re.DOTALL,
+)
 
 ADMIN_LINKS_RE = re.compile(
     r"<div[^>]+class=[\"'][^\"']*j-admin-links[^\"']*[\"'][^>]*>.*?</div>",
@@ -30,9 +34,21 @@ WAYBACK_TEL_RE = re.compile(
     r"https?://web\.archive\.org/web/\d+(?:[a-z_]+)?/(tel:[^\"'\s<>]+)",
     re.IGNORECASE,
 )
+ROOT_WAYBACK_URL_RE = re.compile(
+    r"/web/\d+(?:[a-z_]+)?/(https?://[^\"'\s<>]+)",
+    re.IGNORECASE,
+)
+ROOT_WAYBACK_SITE_PATH_RE = re.compile(
+    r"/web/\d+(?:[a-z_]+)?//([^\"'\s<>]+)",
+    re.IGNORECASE,
+)
 
 DIRECT_ASSET_URL_RE = re.compile(
-    r"https?://(?:www\.echecs92\.fr|assets\.jimstatic\.com|u\.jimcdn\.com|image\.jimcdn\.com|api\.dmp\.jimdo-server\.com|fonts\.jimstatic\.com)(?:/[^\"'\s<>]*)?",
+    r"(?:https?:)?//(?:www\.echecs92\.fr|assets\.jimstatic\.com|u\.jimcdn\.com|image\.jimcdn\.com|api\.dmp\.jimdo-server\.com|fonts\.jimstatic\.com)(?:/[^\"'\s<>]*)?",
+    re.IGNORECASE,
+)
+ARCHIVE_PREFETCH_RE = re.compile(
+    r"<link\s+rel=[\"'][^\"']*(?:dns-prefetch|preconnect)[^\"']*[\"'][^>]+href=[\"'](?:https?:)?//(?:www\.echecs92\.fr|assets\.jimstatic\.com|u\.jimcdn\.com|image\.jimcdn\.com|api\.dmp\.jimdo-server\.com|fonts\.jimstatic\.com)[^\"']*[\"'][^>]*>\s*",
     re.IGNORECASE,
 )
 
@@ -159,6 +175,21 @@ def jimcdn_image_fallback_paths(path: str) -> list[str]:
     return []
 
 
+def normalized_original_url(url: str) -> str:
+    url = url.replace("&amp;", "&")
+    # Social share widgets embed the original page URL in another URL and then
+    # append a title with `&t=...`. That suffix is not part of the page URL.
+    if "&t=" in url and "?" not in url.split("&t=", 1)[0]:
+        url = url.split("&t=", 1)[0]
+    if url.startswith("//"):
+        return "https:" + url
+    return url
+
+
+def wayback_missing_url(original_url: str) -> str:
+    return f"https://web.archive.org/web/0id_/{normalized_original_url(original_url)}"
+
+
 def resolve_local_url(root: Path, host: str, path: str, query: str) -> str | None:
     if host == "www.echecs92.fr":
         base_prefix = Path()
@@ -194,6 +225,11 @@ def resolve_local_url(root: Path, host: str, path: str, query: str) -> str | Non
         if (root / candidate).is_file():
             return "/" + candidate.as_posix()
 
+    # Social share URLs sometimes append title/query parameters to an otherwise
+    # normal page URL. The archived page exists without that query string.
+    if host == "www.echecs92.fr" and query and not path.startswith("/app/download/"):
+        return resolve_local_url(root, host, path, "")
+
     return None
 
 
@@ -203,7 +239,7 @@ def replace_wayback_urls(
     missing_urls: set[str],
 ) -> str:
     def repl(match: re.Match) -> str:
-        original = match.group(1)
+        original = normalized_original_url(match.group(1))
         parsed = urlparse(original)
         host = parsed.netloc
         path = parsed.path or "/"
@@ -220,7 +256,7 @@ def replace_wayback_urls(
         # Only report as "missing" when it's something we intend to serve locally
         # (the Jimdo site itself, or its asset hosts).
         if host in ARCHIVE_HOSTS:
-            missing_urls.add(match.group(0))
+            missing_urls.add(normalized_original_url(match.group(0)))
             return match.group(0)
 
         # External links: unwrap the Wayback wrapper so navigation stays natural.
@@ -232,9 +268,34 @@ def replace_wayback_urls(
     return html
 
 
-def replace_direct_asset_urls(html: str, root: Path) -> str:
+def replace_root_wayback_urls(html: str, root: Path, missing_urls: set[str]) -> str:
+    def repl_absolute(match: re.Match) -> str:
+        original = normalized_original_url(match.group(1))
+        parsed = urlparse(original)
+        host = parsed.netloc
+        local_url = resolve_local_url(root, host, parsed.path or "/", parsed.query)
+        if local_url:
+            return local_url
+        if host in ARCHIVE_HOSTS:
+            missing_urls.add("https://web.archive.org" + normalized_original_url(match.group(0)))
+        return match.group(0)
+
+    def repl_site_path(match: re.Match) -> str:
+        path_and_query = normalized_original_url(match.group(1))
+        parsed = urlparse("https://www.echecs92.fr/" + path_and_query.lstrip("/"))
+        local_url = resolve_local_url(root, "www.echecs92.fr", parsed.path or "/", parsed.query)
+        if local_url:
+            return local_url
+        return "/" + path_and_query.lstrip("/")
+
+    html = ROOT_WAYBACK_URL_RE.sub(repl_absolute, html)
+    html = ROOT_WAYBACK_SITE_PATH_RE.sub(repl_site_path, html)
+    return html
+
+
+def replace_direct_asset_urls(html: str, root: Path, missing_urls: set[str]) -> str:
     def repl(match: re.Match) -> str:
-        original = match.group(0)
+        original = normalized_original_url(match.group(0))
         parsed = urlparse(original)
         host = parsed.netloc
         if host not in ARCHIVE_HOSTS:
@@ -248,6 +309,7 @@ def replace_direct_asset_urls(html: str, root: Path) -> str:
                 alt_local = resolve_local_url(root, host, alt_path, parsed.query)
                 if alt_local:
                     return alt_local
+        missing_urls.add(wayback_missing_url(original))
         return original
 
     return DIRECT_ASSET_URL_RE.sub(repl, html)
@@ -256,9 +318,12 @@ def replace_direct_asset_urls(html: str, root: Path) -> str:
 def process_html(html_path: Path, root: Path, domain: str, missing_urls: set[str]) -> None:
     text = html_path.read_text(encoding="utf-8", errors="ignore")
     text = WAYBACK_BLOCK_RE.sub("", text)
+    text = WAYBACK_TOOLBAR_RE.sub("", text)
+    text = ARCHIVE_PREFETCH_RE.sub("", text)
     text = ADMIN_LINKS_RE.sub("", text)
     text = replace_wayback_urls(text, root, missing_urls)
-    text = replace_direct_asset_urls(text, root)
+    text = replace_root_wayback_urls(text, root, missing_urls)
+    text = replace_direct_asset_urls(text, root, missing_urls)
     text = inject_meta(text, domain, html_path, root)
     html_path.write_text(text, encoding="utf-8")
 
@@ -266,6 +331,17 @@ def process_html(html_path: Path, root: Path, domain: str, missing_urls: set[str
 def write_robots(root: Path) -> None:
     robots_path = root / "robots.txt"
     robots_path.write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
+
+
+def write_htaccess(root: Path) -> None:
+    htaccess_path = root / ".htaccess"
+    htaccess_path.write_text(
+        '<IfModule mod_headers.c>\n'
+        '  Header set X-Robots-Tag "noindex, nofollow" always\n'
+        '</IfModule>\n'
+        'Options -Indexes\n',
+        encoding="utf-8",
+    )
 
 
 def main() -> int:
@@ -289,6 +365,7 @@ def main() -> int:
         process_html(html_path, target_root, domain, missing_urls)
 
     write_robots(target_root)
+    write_htaccess(target_root)
 
     report_path = target_root / "missing-wayback-urls.txt"
     if missing_urls:

@@ -1,0 +1,53 @@
+name: Archive legacy echecs92.fr
+
+on:
+  schedule:
+    - cron: '15 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      OUT_DIR: archive-wayback
+      ARCHIVE_DOMAIN: ${{ vars.ARCHIVE_DOMAIN || 'archive.echecs92.com' }}
+      ARCHIVE_FTP_SERVER_DIR: ${{ vars.ARCHIVE_FTP_SERVER_DIR || '/www/archive/' }}
+      FTP_SERVER: ${{ secrets.FTP_SERVER }}
+      FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+      FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install archive tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lftp wget zip
+
+      - name: Build static archive
+        run: ./scripts/update-archive-wayback.sh "$OUT_DIR" "$ARCHIVE_DOMAIN" latest
+
+      - name: Upload archive artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: echecs92-legacy-archive
+          path: |
+            archive-wayback
+            archive-wayback.zip
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Deploy archive via FTP
+        if: ${{ env.FTP_SERVER != '' && env.FTP_USERNAME != '' && env.FTP_PASSWORD != '' }}
+        run: |
+          lftp -u "${FTP_USERNAME}","${FTP_PASSWORD}" "ftp://${FTP_SERVER}" <<EOF
+          set ssl:verify-certificate no
+          set ftp:passive-mode true
+          mirror --reverse --delete --verbose --parallel=4 "${OUT_DIR}/" "${ARCHIVE_FTP_SERVER_DIR}"
+          bye
+          EOF

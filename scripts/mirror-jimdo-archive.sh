@@ -47,7 +47,7 @@ wget \
   --adjust-extension \
   --convert-links \
   --continue \
-  --max-redirect=10 \
+  --max-redirect=4 \
   --timeout=20 \
   --restrict-file-names=windows \
   --span-hosts \
@@ -71,6 +71,11 @@ set -e
 if [[ $status -ne 0 ]]; then
   echo "Warning: wget exited with status $status; continuing with post-processing." >&2
 fi
+
+# Wget gets a useful first pass for assets, but normal Wayback replay can inject
+# toolbar markup and can miss unlinked pages. CDX gives us one latest raw capture
+# for every archived HTML page of the old site.
+python3 scripts/fetch-wayback-cdx.py "$out_dir" 0.2 || true
 
 python3 scripts/postprocess-archive.py "$out_dir" "$archive_domain"
 

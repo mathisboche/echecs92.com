@@ -34,9 +34,12 @@ Disk usage: $size_human
 Remaining missing Wayback URLs: $missing_count
 EOF
 
+if [[ "${ARCHIVE_VALIDATE:-1}" != "0" ]]; then
+  python3 scripts/validate-archive.py "$OUT_DIR" --min-html-pages "${ARCHIVE_MIN_HTML_PAGES:-40}"
+fi
+
 # Keep a single zip next to the folder for deployment/backups.
 ZIP_PATH="${OUT_DIR}.zip"
 rm -f "$ZIP_PATH"
 zip -rq "$ZIP_PATH" "$OUT_DIR" -x '*.DS_Store'
 echo "Wrote $ZIP_PATH"
-
