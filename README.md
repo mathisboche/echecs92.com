@@ -1,9 +1,5 @@
-# echecs92
+# Échecs92
 
-Dépôt technique du site WordPress du CDJE 92.
+Ce dépôt sert à gérer le site du Comité Départemental du Jeu d'Échecs des Hauts-de-Seine.
 
-- `wp-content/` : thème, extensions et assets
-- `scripts/` : scripts de maintenance
-- `docs/` : documentation technique
-
-Le cœur WordPress n'est pas inclus.
+Le site public est disponible ici : https://echecs92.com
