@@ -2,7 +2,7 @@ name: Sync FIDE official data
 
 on:
   schedule:
-    - cron: '25 */6 * * *'
+    - cron: '25 4,10,16,22 * * *'
     - cron: '20 1 * * 0'
   workflow_dispatch:
     inputs:
@@ -27,7 +27,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Install lftp
         run: |
           sudo apt-get update
@@ -42,9 +42,10 @@ jobs:
           if ! lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "ftp://$FTP_SERVER:21" -e "
           set ftp:passive-mode true
           set ssl:verify-certificate no
-          set net:max-retries 2
-          set net:reconnect-interval-base 2
-          set net:timeout 20
+          set net:max-retries 5
+          set net:reconnect-interval-base 5
+          set net:reconnect-interval-max 30
+          set net:timeout 45
           set cmd:fail-exit false
           mirror --verbose --only-newer /www/wp-content/themes/echecs92-child/assets/data/ wp-content/themes/echecs92-child/assets/data/
           bye
@@ -57,9 +58,10 @@ jobs:
             if ! lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "ftp://$FTP_SERVER:21" -e "
             set ftp:passive-mode true
             set ssl:verify-certificate no
-            set net:max-retries 2
-            set net:reconnect-interval-base 2
-            set net:timeout 20
+            set net:max-retries 5
+            set net:reconnect-interval-base 5
+            set net:reconnect-interval-max 30
+            set net:timeout 45
             set cmd:fail-exit false
             mirror --verbose --only-newer /www/wp-content/themes/echecs92-child/assets/data.__staging/ wp-content/themes/echecs92-child/assets/data/
             bye
@@ -69,9 +71,9 @@ jobs:
             fi
           fi
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
       - name: Sync official FIDE files
         env:
           FIDE_ARCHIVE_PERIODS: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.archive_periods || '1') || (github.event_name == 'schedule' && github.event.schedule == '20 1 * * 0' && '1' || '0') }}

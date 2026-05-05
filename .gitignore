@@ -4,6 +4,9 @@ wp-content/.secrets/
 # OS noise
 .DS_Store
 
+# Local archives kept inside this one project folder
+_archives/
+
 # Generated / sensitive content (keep out of public repo)
 archive-wayback/
 archive-wayback.zip

@@ -2,7 +2,7 @@ name: Sync FFE address hints
 
 on:
   schedule:
-    - cron: '50 2 * * *'
+    - cron: '50 4 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -17,7 +17,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Install lftp
         run: |
           sudo apt-get update
@@ -32,9 +32,10 @@ jobs:
           if ! lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "ftp://$FTP_SERVER:21" -e "
           set ftp:passive-mode true
           set ssl:verify-certificate no
-          set net:max-retries 2
-          set net:reconnect-interval-base 2
-          set net:timeout 20
+          set net:max-retries 5
+          set net:reconnect-interval-base 5
+          set net:reconnect-interval-max 30
+          set net:timeout 45
           set cmd:fail-exit false
           mirror --verbose --only-newer /www/wp-content/themes/echecs92-child/assets/data/ wp-content/themes/echecs92-child/assets/data/
           bye
@@ -47,9 +48,10 @@ jobs:
             if ! lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "ftp://$FTP_SERVER:21" -e "
             set ftp:passive-mode true
             set ssl:verify-certificate no
-            set net:max-retries 2
-            set net:reconnect-interval-base 2
-            set net:timeout 20
+            set net:max-retries 5
+            set net:reconnect-interval-base 5
+            set net:reconnect-interval-max 30
+            set net:timeout 45
             set cmd:fail-exit false
             mirror --verbose --only-newer /www/wp-content/themes/echecs92-child/assets/data.__staging/ wp-content/themes/echecs92-child/assets/data/
             bye
@@ -62,9 +64,9 @@ jobs:
             echo "WARN: FTP snapshot still incomplete after fallback. Continuing with repository baseline."
           fi
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
       - name: Verify postal coordinates updater
         run: node --test scripts/update-postal-coordinates-fr.test.js
       - name: Regenerate address hints
